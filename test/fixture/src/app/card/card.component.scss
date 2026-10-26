@@ -1,0 +1,12 @@
+@use '../../styles/variables' as v;
+:host { display: block; }
+.card {
+  border: 1px solid #ccc;
+  &__title { font-weight: 600; }
+  &__body, &__footer { padding: 1rem; }
+  &.is-active { border-color: green; }
+  .md\:flex { display: flex; }
+}
+@media (max-width: 600px) {
+  .card__title { font-size: 1rem; }
+}

@@ -1,0 +1,8 @@
+<div class="card is-active" [class.card--active]="active">
+  <h2 class="card__title page-title">Title</h2>
+  <div [ngClass]="{ 'card__body': active, card__footer: !active }"></div>
+  <button class="btn {{ active ? 'btn--primary' : 'btn' }}">Go</button>
+  <span class="md:flex"></span>
+  <!-- <p class="ghost"></p> -->
+  <p class=""></p>
+</div>

@@ -1,0 +1,3 @@
+@use 'styles/buttons';
+.page-title { font-size: 2rem; }
+.card { margin: 0; } // global .card, should lose to component-local one

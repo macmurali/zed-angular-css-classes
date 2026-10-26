@@ -1,0 +1,6 @@
+/* a .commented-out class */
+.btn {
+  padding: .5rem 1rem;
+  &--primary { color: blue; }
+  &:hover { opacity: .8; }
+}
