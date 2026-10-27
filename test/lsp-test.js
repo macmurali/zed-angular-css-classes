@@ -37,10 +37,19 @@ const posOf = (text, needle, delta = 1) => {
   const before = text.slice(0, i).split('\n');
   return { line: before.length - 1, character: before[before.length - 1].length };
 };
-const where = (loc) => `${path.relative(root, new URL(loc.uri).pathname)}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`;
+const where = (loc) => {
+  const u = loc.targetUri || loc.uri;
+  const r = loc.targetSelectionRange || loc.range;
+  return `${path.relative(root, new URL(u).pathname)}:${r.start.line + 1}:${r.start.character + 1}`;
+};
+const spanText = (text, range) => {
+  const lines = text.split('\n');
+  assert.strictEqual(range.start.line, range.end.line);
+  return lines[range.start.line].slice(range.start.character, range.end.character);
+};
 
 (async () => {
-  const init = await request('initialize', { rootUri: pathToFileURL(root).href, capabilities: {}, initializationOptions: {} });
+  const init = await request('initialize', { rootUri: pathToFileURL(root).href, capabilities: { textDocument: { definition: { linkSupport: true } } }, initializationOptions: {} }); // linkSupport: same as Zed
   assert(init.result.capabilities.definitionProvider);
   notify('initialized', {});
   notify('textDocument/didOpen', { textDocument: { uri: uri(tpl), languageId: 'html', version: 1, text: tplText } });
@@ -56,6 +65,7 @@ const where = (loc) => `${path.relative(root, new URL(loc.uri).pathname)}:${loc.
     ["'btn--primary'", 3, ['src/styles/_buttons.scss:4:3']],                  // interpolation + @use import
     ['is-active', 2, ['src/app/card/card.component.scss:7:5']],
     ['md:flex"', 2, ['src/app/card/card.component.scss:8:4']],               // escaped selector
+    ['fa-arrow-right"', 9, ['src/vendor/fa.min.css:1:40']],                   // hyphenated, minified, :before
   ];
   for (const [needle, delta, expected] of cases) {
     const res = await def(needle, delta);
@@ -63,6 +73,14 @@ const where = (loc) => `${path.relative(root, new URL(loc.uri).pathname)}:${loc.
     assert.deepStrictEqual(got, expected, `definition for ${needle}: got ${JSON.stringify(got)}`);
     console.log('ok  definition', needle.padEnd(18), '->', got.join(', '));
   }
+  // cmd-hover underline: the link's origin must be the whole hyphenated class,
+  // whichever part of it the mouse is over
+  for (const delta of [0, 4, 13]) {
+    const links = await def('fa-arrow-right"', delta);
+    assert.strictEqual(spanText(tplText, links[0].originSelectionRange), 'fa-arrow-right');
+  }
+  console.log('ok  underline range covers the whole "fa-arrow-right"');
+
   assert.strictEqual(await def('[class.card--active]', 9), null);
   console.log('ok  undefined class returns null');
 
@@ -75,6 +93,17 @@ const where = (loc) => `${path.relative(root, new URL(loc.uri).pathname)}:${loc.
   assert(labels[0].startsWith('card'), 'component classes sorted first');
   assert(labels.includes('btn--primary') && labels.includes('page-title'));
   console.log('ok  completion', labels.length, 'items, first:', labels.slice(0, 4).join(' '));
+
+  // completion filters on the full hyphenated prefix and replaces all of it
+  const typed = tplText.replace('<p class=""', '<p class="fa-arr"');
+  notify('textDocument/didChange', { textDocument: { uri: uri(tpl), version: 2 }, contentChanges: [{ text: typed }] });
+  const faComp = (await request('textDocument/completion', { textDocument: { uri: uri(tpl) }, position: posOf(typed, '<p class="fa-arr', 16) })).result;
+  const faLabels = faComp.items.map((i) => i.label);
+  assert.deepStrictEqual(faLabels, ['fa-arrow-left', 'fa-arrow-right']);
+  assert.strictEqual(spanText(typed, faComp.items[0].textEdit.range), 'fa-arr');
+  assert.strictEqual(faComp.isIncomplete, true);
+  console.log('ok  completion for "fa-arr" ->', faLabels.join(' '));
+  notify('textDocument/didChange', { textDocument: { uri: uri(tpl), version: 3 }, contentChanges: [{ text: tplText }] });
 
   const noComp = (await request('textDocument/completion', { textDocument: { uri: uri(tpl) }, position: posOf(tplText, '<h2 ', 1) })).result;
   assert.strictEqual(noComp, null);
@@ -92,7 +121,7 @@ const where = (loc) => `${path.relative(root, new URL(loc.uri).pathname)}:${loc.
   fs.writeFileSync(newFile, '.brand-new { color: red; }\n');
   await new Promise((r) => setTimeout(r, 2500));
   const edited = tplText.replace('class=""', 'class="brand-new"');
-  notify('textDocument/didChange', { textDocument: { uri: uri(tpl), version: 2 }, contentChanges: [{ text: edited }] });
+  notify('textDocument/didChange', { textDocument: { uri: uri(tpl), version: 4 }, contentChanges: [{ text: edited }] });
   const res = (await request('textDocument/definition', { textDocument: { uri: uri(tpl) }, position: posOf(edited, 'brand-new', 2) })).result;
   fs.unlinkSync(newFile);
   assert.deepStrictEqual(res.map(where), ['src/app/card/extra.component.css:1:2']);

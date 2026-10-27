@@ -64,6 +64,12 @@ Optional, in `settings.json`:
 
 `node_modules` is excluded by default; use `extraStylePaths` for the library stylesheets you actually want (Bootstrap, Material, etc.).
 
+For example, if Font Awesome is installed from npm and not listed in `angular.json`'s `styles`, add:
+
+```jsonc
+"extraStylePaths": ["node_modules/@fortawesome/fontawesome-free/css/all.css"]
+```
+
 ## How it works
 
 `src/lib.rs` is the Zed extension. It embeds `server/angular-css-lsp.js` — a small language server with **no npm dependencies** — writes it into the extension's work directory, and runs it with Zed's bundled Node. The server indexes stylesheets on startup and watches the workspace for changes.

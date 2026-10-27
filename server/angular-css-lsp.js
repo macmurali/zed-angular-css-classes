@@ -39,6 +39,7 @@ const DEFAULT_CONFIG = {
 
 let config = { ...DEFAULT_CONFIG };
 let roots = [];
+let clientLinkSupport = false;
 
 function applyConfig(opts) {
   if (!opts || typeof opts !== 'object') return;
@@ -725,6 +726,8 @@ const handlers = {
       ? params.workspaceFolders.map((f) => uriToPath(f.uri))
       : [params.rootUri ? uriToPath(params.rootUri) : params.rootPath];
     roots = folders.filter(Boolean);
+    const caps = params.capabilities || {};
+    clientLinkSupport = !!(caps.textDocument && caps.textDocument.definition && caps.textDocument.definition.linkSupport);
     return {
       capabilities: {
         textDocumentSync: { openClose: true, change: 1, save: { includeText: false } },
@@ -733,7 +736,7 @@ const handlers = {
         referencesProvider: true,
         completionProvider: { triggerCharacters: ['"', "'", ' ', '.'], resolveProvider: false },
       },
-      serverInfo: { name: 'angular-css-lsp', version: '0.1.0' },
+      serverInfo: { name: 'angular-css-lsp', version: '0.1.1' },
     };
   },
 
@@ -789,7 +792,23 @@ const handlers = {
       await rescanIfStale(2000); // a stylesheet may have been created since the last scan
       hits = rankedDefinitions(tok.name, ctx.path);
     }
-    return hits.length ? hits.map(defToLocation) : null;
+    if (!hits.length) return null;
+    if (!clientLinkSupport) return hits.map(defToLocation);
+    // A LocationLink tells the editor exactly which span is the link, so the
+    // cmd-hover underline covers the whole class (e.g. "fa-arrow-right") rather
+    // than the editor's own idea of a word, which stops at "-".
+    const origin = { start: offsetToPos(ctx.starts, tok.start), end: offsetToPos(ctx.starts, tok.end) };
+    return hits.map((hit) => {
+      const loc = defToLocation(hit);
+      const entry = styleIndex.get(hit.path);
+      const ruleEnd = Math.max(hit.def.end, hit.def.ruleEnd);
+      return {
+        originSelectionRange: origin,
+        targetUri: loc.uri,
+        targetRange: { start: offsetToPos(entry.starts, hit.def.ruleStart), end: offsetToPos(entry.starts, ruleEnd) },
+        targetSelectionRange: loc.range,
+      };
+    });
   },
 
   async 'textDocument/hover'({ textDocument, position }) {
@@ -842,23 +861,37 @@ const handlers = {
     let e = offset;
     while (e < attr.valueEnd && /[^\s'"`{},:\[\]]/.test(text[e])) e++;
     const range = { start: offsetToPos(ctx.starts, s), end: offsetToPos(ctx.starts, e) };
+    // Filter here on the full typed prefix, hyphens included. Zed's own filter
+    // word stops at "-" in Angular templates, so "fa-arr" would otherwise be
+    // matched as just "arr". isIncomplete makes Zed re-ask on every keystroke.
+    const prefix = text.slice(s, offset).toLowerCase();
+    const MAX_ITEMS = 500;
 
     const local = componentStyleFiles(ctx.path);
     const global = globalStyleFiles();
     const items = [];
     for (const [name, hits] of getByName()) {
+      const lower = name.toLowerCase();
+      let match = 0; // 0 = starts with prefix, 1 = a "-"/"_" segment starts with it, 2 = contains it
+      if (prefix) {
+        if (lower.startsWith(prefix)) match = 0;
+        else if (lower.includes('-' + prefix) || lower.includes('_' + prefix)) match = 1;
+        else if (lower.includes(prefix)) match = 2;
+        else continue;
+      }
       const tier = hits.some((h) => local.has(h.path)) ? 0 : hits.some((h) => global.has(h.path)) ? 1 : 2;
       const first = hits.find((h) => (tier === 0 ? local.has(h.path) : tier === 1 ? global.has(h.path) : true));
       items.push({
         label: name,
         kind: 7, // Class
         detail: relPath(first.path) + (hits.length > 1 ? ` (+${hits.length - 1})` : ''),
-        sortText: tier + name,
+        sortText: `${match}${tier}${name}`,
         filterText: name,
         textEdit: { range, newText: name },
       });
     }
-    return { isIncomplete: false, items };
+    items.sort((a, b) => (a.sortText < b.sortText ? -1 : a.sortText > b.sortText ? 1 : 0));
+    return { isIncomplete: true, items: items.slice(0, MAX_ITEMS) };
   },
 
   async 'textDocument/references'({ textDocument, position, context }) {

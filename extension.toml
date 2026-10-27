@@ -1,10 +1,10 @@
 id = "angular-css-classes"
 name = "Angular CSS Classes"
 description = "Go to definition, hover, completion and references for CSS classes used in Angular templates."
-version = "0.1.0"
+version = "0.1.1"
 schema_version = 1
 authors = ["Murali <murali@qlarios.com>"]
-repository = "https://github.com/your-name/zed-angular-css-classes"
+repository = "https://github.com/macmurali/zed-angular-css-classes"
 
 [language_servers.angular-css-classes]
 name = "Angular CSS Classes"
